@@ -1,0 +1,18 @@
+42;
+42.PRINT();
+(1+2).PRINT();
+
+s : String = "hello";
+s.PRINT();
+x = 4;
+if x<5 and x>6 {
+	y = 42;
+} else {
+	y = "forty-two";
+}
+y.PRINT();
+
+while x>0{
+	x.PRINT();
+	x = x-1;
+}
