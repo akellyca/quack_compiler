@@ -1,6 +1,6 @@
 =============== PROJECT 2 ===============
 ===     Austen Kelly (951632601)	  ===
-===            12/09/2019	       	  ===
+===            12/14/2019	       	  ===
 =========================================
 
 This project contains a semi-complete parser written for Quack.
@@ -10,27 +10,26 @@ output is stored in ./src/output.
 It has instantiation checks fully implemented (minus typecase).
 Type checking is implemented (again, other than for typecase),
 except that for methods it requires exactly the expected type
-(not super/sub types as desired...).
-I like to test mine on "samples/tiny.qk"
+(not super/sub types as desired...). It occasionally also has issues
+with inherited classes that aren't present in the super class (e.g. with
+hands.qk, it throws a type error that this.hands has no method foo since
+the parent class Hand doesn't, even though both children do...)
+I like to test mine on "samples/tiny.qk" (because it works)
 
 
 (* valid and limited as described in the note below)
 
 =========================================
-NOTE:
-This current version does not support any user defined classes!
-As such, it only runs with quack programs containing only builtin
-types. (Also, since it doesn't work with classes, I haven't implemented
-generation for things like AST::Dot, AST::Return, AST::Construct.)
-It also doesn't work on typecase statements. That being said,
-I am fairly confident that it handles all other types of statements.
-(It does produce some C warnings because I don't cast variables up
-but it runs anyway.)
+NOTE/UPDATE: This now includes user defined classes! I have also cleaned
+up a lot of issues with tmp variable assigning. The biggest outstanding
+issue is that dynamic dispatch barely works, and I still get weird
+seg-faults on function calls sometimes. In particular, if you run on 
+tiny.qk but change the 'if' condition to be false, the print of y
+(which should be "forty-two") fails. Also type checking has some issues.
+But overall I feel good that classes work at all. I plan to keep trying 
+to sort out issues and make it better, but I figured it's time to send in
+a real update.
 
-I would really love to get at least code generation for classes
-implemented, along with co/contravariance checking for overridden 
-methods in type checking. I'll put in updates as I make progress
-through the week. Thank you for being so patient!
 =========================================
 
 To set up:
@@ -54,8 +53,10 @@ To run the generated code (compile and then run):
 For testing with samples/tiny.qk, the output should be:
 42
 3
+Pt(9, 2)
+Blah(5, 10)
 hello
-forty-two
+42
 4
 3
 2

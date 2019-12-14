@@ -6,13 +6,13 @@ class Pt(x: Int, y: Int) extends Obj {
   this.x : Int = x;
   this.y : Int = y;
   this.z = true and false;
-  if x < 7 {
+  /*if x < 7 {
       a = 42;          // a: Int
       b = 13;          // b: Int
   } else {
       a = "forty-two"; // a: String
       b = "thirteen";  // b: String
-  }
+  }*/
 
   def STR() : String {
       return "(" + this.x.STR() + "," 
@@ -38,8 +38,8 @@ class Rect(ll: Pt, ur: Pt) extends Obj {
 
   //def translate(delta: Pt) : Pt {
   def translate(delta: Pt) : Rect {
-      return Rect(ll+delta, ur+delta);
-      //return Rect(ll+Pt, ur+Pt);
+      return Rect(this.ll+delta, this.ur+delta);
+      //return Rect(this.ll+Pt, this.ur+Pt);
   }
 
   def STR() : String {

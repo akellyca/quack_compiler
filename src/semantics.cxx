@@ -189,7 +189,7 @@ public:
 				string mname = m->name_.text_;
 				MethodNode mn = MethodNode(mname);
 				mn.returns = m->returns_.text_;
-				mn.inherited_from = mname;
+				mn.inherited_from = name;
 				AST::Formals *formals_node = &(m->formals_);
 				vector<AST::Formal*> formals = formals_node->elements_;
 				for (AST::Formal *f: formals){
@@ -324,10 +324,11 @@ public:
 			if (v==vname){
 				found = 1;
 				if (local->types[v]!=type){
-					if (vname.find("this.")!=string::npos&&whereami.classname==whereami.methodname){
-						cerr<<"Type Error: Attempting to change type of instance variable!"<<endl;
-						exit(1);
-					}
+					// if (vname.find("this.")!=string::npos&&whereami.classname==whereami.methodname){
+					
+					// 	cerr<<"Type Error: Attempting to change type of instance variable!"<<endl;
+					// 	exit(1);
+					// }
 					local->types[v] = type;
 					changed=1; 
 				}
@@ -344,6 +345,8 @@ public:
 	string get_curr_type(string vname, Whereami whereami){
 		MethodNode *local = &((hierarchy)[whereami.classname].methods[whereami.methodname]);
 		map<string,string>::iterator it;
+
+		if (vname=="this"){return whereami.classname;}
 
 		if (vname=="true"||vname=="false"){return "Boolean";}
 
@@ -416,6 +419,65 @@ public:
 		return 1;
 	}
 
+	void emit_method_sig(CodegenContext &ctxt, Whereami whereami){
+        MethodNode local = this->hierarchy[whereami.classname].methods[whereami.methodname];
+        string toprint, type;
+        if (local.inherited_from!=whereami.classname){
+        	local = this->hierarchy[local.inherited_from].methods[whereami.methodname];
+        	whereami.classname = local.inherited_from;//???
+        }
+        if (whereami.classname==whereami.methodname){
+            toprint = "obj_"+local.returns+" (*constructor) (";
+        } else {
+            toprint = "obj_"+local.returns+" (*"+whereami.methodname+") (";
+     		//if (local.inherited_from!=whereami.classname){
+     			//toprint = toprint+"obj_"+local.inherited_from;
+     		//}else{
+        	toprint = toprint+"obj_"+whereami.classname;//added
+        //}
+        }
+        if (local.formals.size()!=0){
+        	if (whereami.classname!=whereami.methodname){toprint=toprint+", ";}
+        	for (int i=0; i<local.formals.size()-1; i++){
+            	type = local.types[local.formals[i]];
+            	toprint = toprint+"obj_"+type+", ";
+        	}
+        	type = local.types[local.formals[local.formals.size()-1]];
+        	toprint = toprint+"obj_"+type;
+        }
+        ctxt.emit(toprint+");");
+    }
+    
+    string emit_full_sig(CodegenContext &ctxt, Whereami whereami){
+    	MethodNode local = this->hierarchy[whereami.classname].methods[whereami.methodname];
+        string toprint, type;
+        if (whereami.methodname!=whereami.classname){
+        	toprint = toprint+"obj_"+whereami.classname+" this";
+        }
+        if (local.formals.size()!=0){
+        	if (whereami.methodname!=whereami.classname){toprint=toprint+", ";}
+        	for (int i=0; i<local.formals.size()-1; i++){
+            	type = local.types[local.formals[i]];
+            	toprint = toprint+"obj_"+type+" var_"+local.formals[i]+", ";
+        	}
+        	type = local.types[local.formals[local.formals.size()-1]];
+        	toprint = toprint+"obj_"+type+" var_"+local.formals[local.formals.size()-1];
+        }
+        return toprint;
+    }
+
+    void emit_class_struct(CodegenContext &ctxt, string cname){
+    	vector<string> methods = this->hierarchy[cname].methods_list;
+    	for (string m: methods){
+    		MethodNode method = this->hierarchy[cname].methods[m];
+    		if (m==cname){ctxt.emit("new_"+cname+", // Constructor");}
+    		else{
+    			ctxt.emit(method.inherited_from+"_method_"+m+",");
+    		}
+    	}
+    	cout<<endl;
+    }
+
 	//================================================//
 	//================================================//
 	void propagate_instance_var_types(string clazz){
@@ -450,7 +512,8 @@ public:
 					}
 					if (!found){ 
 						MethodNode mn = MethodNode(hierarchy[clazz].methods[m]);
-						mn.inherited_from = clazz;
+						//mn.inherited_from = clazz;
+						mn.inherited_from = hierarchy[clazz].methods[m].inherited_from;
 						hierarchy[c].methods[mn.name] = mn;
 						hierarchy[c].methods_list.push_back(mn.name);
 					}

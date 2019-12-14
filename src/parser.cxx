@@ -48,13 +48,11 @@ private:
 void generate_code(AST::Program *root, Semantics *s) {
     CodegenContext ctx(std::cout);
     // Prologue
-    ctx.emit("#include <stdio.h>");
-    ctx.emit("#include \"Builtins.c\"");
-    ctx.emit("int main(int argc, char **argv) {");
+    
     // Body of generated code
-    std::string target = ctx.alloc_reg("obj_Obj");
-    root->gen_rval(ctx, target, s, Whereami("test","test"));
-    ctx.emit("}");
+    //root->gen_rval(ctx, "", s, Whereami("dummy","dummy"));
+    root->gen_rval(ctx, s, Whereami("dummy","dummy"));
+    
     //ctx.emit(std::string(R"(printf("-> %d\n",)") + target + ");");
 }
 

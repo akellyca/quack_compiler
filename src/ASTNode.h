@@ -48,15 +48,19 @@ namespace AST {
         virtual string get_name(){return "";}
         virtual string infer_type(Semantics *s, Whereami whereami){return "TOP";}
         virtual int eval(EvalContext &ctxt){return 0;}//immediate eval
-        virtual string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami){
+        virtual string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
             cerr << "*** No rvalue for this node ***" << endl; exit(1);//assert(false);
+            return "";
         }
         virtual string gen_lval(CodegenContext &ctx, Semantics *s, Whereami whereami) {
             cerr << "*** No lvalue for this node ***" << endl; exit(1);//assert(false);
         }
-        virtual string gen_branch(CodegenContext &ctx, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
+        virtual void gen_branch(CodegenContext &ctx, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
             cerr << "*** No branching on this node ****" << endl; exit(1);//assert(false);
         }
+        virtual void emit_obj(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+            cerr << "*** No emit_obj for this node ***" << endl; exit(1);
+        };
         virtual int init_check(vector<string> *init){return 1;}
         virtual void json(ostream& out, AST_print_context& ctx){;}
         string str() {
@@ -109,12 +113,18 @@ namespace AST {
             for (Kind *el: elements_){ el->infer_type(s, whereami); }
             return kind_; 
         }
-        string gen_rval(CodegenContext& ctxt, string target_reg, Semantics *s, Whereami whereami) override {
+        //string gen_rval(CodegenContext& ctxt, string target_reg, Semantics *s, Whereami whereami) override {
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override {
             for (Kind *el: elements_) {
-                el->gen_rval(ctxt, target_reg, s, whereami);
+                el->gen_rval(ctxt, s, whereami);
             }
-            return "success";
+            return "";
         }  
+        void emit_obj(CodegenContext &ctxt, Semantics *s, Whereami whereami) override {
+            for (Kind *el: elements_) {
+                el->emit_obj(ctxt, s, whereami);
+            }
+        }
         Seq(string kind) : kind_{kind}, elements_{vector<Kind *>()} {}
         void append(Kind *el) { elements_.push_back(el); }
         void json(ostream &out, AST_print_context &ctx) override {
@@ -217,6 +227,7 @@ namespace AST {
         string get_type() override {return "Method";}
         // init_check not defined because manually iterating
         string infer_type(Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override;
         explicit Method(Ident& name, Formals& formals, Ident& returns, Block& statements) :
           name_{name}, formals_{formals}, returns_{returns}, statements_{statements} {}
         void json(std::ostream& out, AST_print_context&ctx) override;
@@ -263,7 +274,7 @@ namespace AST {
             return 1;
         }
         string infer_type(Semantics *s, Whereami whereami) override;
-        string gen_rval(CodegenContext& ctxt, string target_reg,Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override;
         explicit Assign(ASTNode &lexpr, ASTNode &rexpr) :
            lexpr_{lexpr}, rexpr_{rexpr} { }
         void json(std::ostream& out, AST_print_context& ctx) override;
@@ -317,8 +328,9 @@ namespace AST {
             return loc_.init_check(init);
         }
         string infer_type(Semantics *s, Whereami whereami) override;
-        string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
-        string gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
+        string gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
+        void gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
         Load(LExpr &loc) : loc_{loc} {}
         void json(std::ostream &out, AST_print_context &ctx) override;
     };
@@ -335,6 +347,7 @@ namespace AST {
             return s;
         }
         string infer_type(Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override;
         explicit Return(ASTNode& expr) : expr_{expr}  {}
         void json(std::ostream& out, AST_print_context& ctx) override;
     };
@@ -379,7 +392,7 @@ namespace AST {
             }
             return 1;
         }
-        string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit If(ASTNode& cond, Seq<ASTNode>& truepart, Seq<ASTNode>& falsepart) :
             cond_{cond}, truepart_{truepart}, falsepart_{falsepart} { };
         string infer_type(Semantics *s, Whereami whereami) override;
@@ -401,7 +414,7 @@ namespace AST {
             return body_.init_check(&tmp);;
         }
         string infer_type(Semantics *s, Whereami whereami) override;
-        string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit While(ASTNode& cond, Block& body) :
             cond_{cond}, body_{body} { };
         void json(std::ostream& out, AST_print_context& ctx) override;
@@ -424,6 +437,8 @@ namespace AST {
         string get_type() override {return "Class";}
         // Doesn't get a "init_check" because iterating manually through
         string infer_type(Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override;
+        void emit_obj(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit Class(Ident& name, Ident& super,
                  Method& constructor, Methods& methods) :
             name_{name},  super_{super},
@@ -442,12 +457,13 @@ namespace AST {
     class IntConst : public Expr {
     public:
         int value_;
-        std::string get_type() override { return "IntConst";}
+        string get_type() override { return "IntConst";}
         int init_check(vector<string> *init) override {
             return 1;
         }
         string infer_type(Semantics *s, Whereami whereami) override;
-        virtual string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
+        string gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit IntConst(int v) : value_{v} {}
         void json(std::ostream& out, AST_print_context& ctx) override;
     };
@@ -484,19 +500,21 @@ namespace AST {
 
     class StrConst : public Expr {
     public:
-        std::string value_;
-        std::string get_type() override {return "StrConst";}
+        string value_;
+        string get_type() override {return "StrConst";}
         int init_check(vector<string> *init) override {
             return 1;
         }
         explicit StrConst(std::string v) : value_{v} {}
         string infer_type(Semantics *s, Whereami whereami) override;
-        virtual string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
+        string gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         void json(std::ostream& out, AST_print_context& ctx) override;
     };
 
     class Actuals : public Seq<Expr> {
     public:
+        string gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit Actuals() : Seq("Actuals") {}
     };
 
@@ -518,7 +536,7 @@ namespace AST {
             return actuals_.init_check(init);
         }
         string infer_type(Semantics *s, Whereami whereami) override;
-        //string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit Construct(Ident& method, Actuals& actuals) :
                 method_{method}, actuals_{actuals} {}
         void json(std::ostream& out, AST_print_context& ctx) override;
@@ -546,8 +564,8 @@ namespace AST {
             }
         }
         string infer_type(Semantics *s, Whereami whereami) override;
-        string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
-        string gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
+        void gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
         explicit Call(Expr& receiver, Ident& method, Actuals& actuals) :
                 receiver_{receiver}, method_{method}, actuals_{actuals} {};
         // Convenience factory for the special case of a method
@@ -585,8 +603,8 @@ namespace AST {
                 return 0;
             }
         }
-        string gen_rval(CodegenContext& ctxt, string target_reg, Semantics *s, Whereami whereami) override;
-        string gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override;
+        void gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
         explicit And(ASTNode& left, ASTNode& right) :
             BinOp("And", left, right) {}
     
@@ -605,8 +623,8 @@ namespace AST {
                 return 0;
             }
         }
-        string gen_rval(CodegenContext& ctxt, string target_reg, Semantics *s, Whereami whereami) override;
-        string gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override;
+        void gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
         explicit Or(ASTNode& left, ASTNode& right) :
                 BinOp("Or", left, right) {}
     };
@@ -623,8 +641,8 @@ namespace AST {
                 return 0;
             }
         }
-        string gen_rval(CodegenContext& ctxt, string target_reg, Semantics *s, Whereami whereami) override;
-        string gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
+        string gen_rval(CodegenContext& ctxt, Semantics *s, Whereami whereami) override;
+        void gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) override;
         explicit Not(ASTNode& left ):
             left_{left}  {}
         void json(std::ostream& out, AST_print_context& ctx) override;
@@ -674,6 +692,7 @@ namespace AST {
             } else { return 1;}
         }
         string infer_type(Semantics *s, Whereami whereami) override;
+        string gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit Dot (Expr& left, Ident& right) :
            left_{left},  right_{right} {}
         void json(std::ostream& out, AST_print_context& ctx) override;
@@ -689,7 +708,7 @@ namespace AST {
         Block& statements_;
         virtual string get_type() override {return "Program";}
         string infer_type(Semantics *s, Whereami whereami) override;
-        virtual string gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) override;
+        virtual string gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) override;
         explicit Program(Classes& classes, Block& statements) :
                 classes_{classes}, statements_{statements} {}
         void json(std::ostream& out, AST_print_context& ctx) override;

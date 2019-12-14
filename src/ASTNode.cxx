@@ -4,8 +4,6 @@
 
 #include "ASTNode.h"
 #include "semantics.cxx"
-//#include "CodegenContext.h"
-//#include "EvalContext.h"
 
 #include <algorithm>
 #include <vector>
@@ -18,6 +16,10 @@ namespace AST {
     string Program::infer_type(Semantics *s, Whereami whereami){ 
         // infer classes
         classes_.infer_type(s, whereami);
+        // for (string c: s->all_types){
+        //     s->propagate_instance_var_types(c);
+        // }
+
         // then do same for main body
         whereami.classname = "Main";
         whereami.methodname = "Main";
@@ -43,6 +45,8 @@ namespace AST {
 
     string Method::infer_type(Semantics *s, Whereami whereami){
         MethodNode *local = &((s->hierarchy)[whereami.classname].methods[whereami.methodname]);
+        //cerr<<"Processing method "<<whereami.methodname<<" in "<<whereami.classname<<" from "<<local->inherited_from<<endl;
+
         formals_.infer_type(s, whereami);
 
         statements_.infer_type(s, whereami);
@@ -108,7 +112,12 @@ namespace AST {
 
     string Load::infer_type(Semantics *s, Whereami whereami){
         string vname = loc_.get_name();
+        // if (vname.find("this")!=string::npos){
+        //     s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname] = 
+        // }
         string type = loc_.infer_type(s, whereami);
+        //cout<<vname<<" "<<loc_.get_type()<<" "<<type<<endl;
+        //cout << "Inferring load of "<<vname<<" as "<<type<<" in "<<whereami.classname<<"."<<whereami.methodname<<endl;
         return type;
     }
 
@@ -132,12 +141,19 @@ namespace AST {
         string inmethod = whereami.methodname;
         string call_class = receiver_.infer_type(s, whereami);
         string mname = method_.get_name();
+        //cerr<<"Processing call "<<call_class<<"."<<mname<<endl;
         int has_method = 0;
         for (string m: s->hierarchy[call_class].methods_list){
+            //if(call_class=="Blah"){cerr<<m<<endl;}
             if (m==mname){
                 has_method=1;
                 // Now check proper actuals types
                 MethodNode *mn = &((s->hierarchy)[call_class].methods[mname]);
+                if (mn->inherited_from!=call_class){
+                    //cerr<<"Changing call loc to "<<mn->inherited_from<<endl;
+                    mn = &((s->hierarchy)[mn->inherited_from].methods[mname]);
+                    //cerr<<(s->hierarchy)[mn->inherited_from].methods[mname].formals.size()<<endl;
+                }
                 int n_expected = mn->formals.size();
                 int n_provided = actuals_.elements_.size();
                 if (n_expected!=n_provided){
@@ -158,6 +174,10 @@ namespace AST {
                 break;
             }
         }
+        // if (method_.get_name()=="PLUS"){
+        //     cout << "Done with call on "<<receiver_.get_type()<<". Found: "<<has_method<<endl;
+        //     cout<<"\t with call class: "<<call_class<<", on method: "<<method_.get_name()<<endl;
+        // }
         if (!has_method){
             cerr << "Type error: Class "<<call_class<<" has no method "<<mname<<endl;
             exit(1);
@@ -250,122 +270,218 @@ namespace AST {
     //===================================================//
 
 
-    string Program::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
+    string Program::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        ctxt.emit("#include <stdio.h>");
+        ctxt.emit("#include \"Builtins.c\"");
+
+        classes_.emit_obj(ctxt, s, whereami); // ensure namespace exists
+        classes_.gen_rval(ctxt, s, whereami);
+
+        ctxt.emit("int main(int argc, char **argv) {");
         whereami.classname = "Main";
         whereami.methodname = "Main";
-        classes_.gen_rval(ctxt, target_reg, s, whereami);
-        statements_.gen_rval(ctxt, target_reg, s, whereami);
-        return "Program";
+        //CodegenContext *bodyctxt = new CodegenContext(ctxt);
+        CodegenContext bodyctxt(cout);
+        //target_reg = ctxt.alloc_reg("Obj");
+        statements_.gen_rval(bodyctxt, s, whereami);
+        ctxt.emit("}");
+        return "";
     }
 
-    string Assign::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
+    void Class::emit_obj(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        ctxt.define_class_structs(name_.text_);
+        ctxt.emit("");
+    }
+
+    string Class::gen_rval(CodegenContext &octxt, Semantics *s, Whereami whereami){
+        CodegenContext ctxt(cout);
+        string cname = name_.text_;
+        whereami.classname = cname;
+        ctxt.emit("typedef struct obj_"+cname+"_struct {");
+        ctxt.emit("class_"+cname+" clazz;");
+        string type, fullname, loc;
+        vector<string> insts = s->hierarchy[cname].instance_vars;
+        for (string v:s->hierarchy[cname].instance_vars){
+            type = s->hierarchy[cname].methods[cname].types[v];
+            string ivar = ctxt.get_var(v, type);
+        }
+        ctxt.emit("} *obj_"+cname+";");
+        ctxt.emit("");
+        ctxt.emit("struct class_"+cname+"_struct {");
+        for (string m: s->hierarchy[cname].methods_list){
+            whereami.methodname = m;
+            s->emit_method_sig(ctxt, whereami);
+        }
+        ctxt.emit("};");
+        ctxt.emit("");
+        ctxt.emit("struct class_"+cname+"_struct the_class_"+cname+"_struct;");
+        ctxt.emit("class_"+cname+" the_class_"+cname+";");
+        ctxt.emit("");
+
+        whereami.methodname = cname;
+        //CodegenContext *construct_con = new CodegenContext(ctxt);
+        constructor_.gen_rval(ctxt, s, whereami);
+        methods_.gen_rval(ctxt, s, whereami);
+
+        ctxt.emit("struct class_"+cname+"_struct the_class_"+cname+"_struct = {");
+        ctxt.emit("//print out methods - based on where inherited from!!!");
+        s->emit_class_struct(ctxt, cname);
+        ctxt.emit("};");
+
+        ctxt.emit("class_"+cname+" the_class_"+cname+" = &the_class_"+cname+"_struct;");
+        ctxt.emit("");
+        return "";
+    }
+
+    string Method::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        //CodegenContext mctxt(cout);
+        CodegenContext mctxt = ctxt;
+        string cname = whereami.classname;
+        string mname = name_.text_;//whereami.methodname;
+        whereami.methodname = mname;
+        MethodNode local = s->hierarchy[cname].methods[mname];
+        if (local.inherited_from!=whereami.classname){
+            local = s->hierarchy[local.inherited_from].methods[whereami.methodname];
+        }
+        string returns = local.returns;
+
+        for (string f: local.formals){
+            string internal = "var_"+f;
+            mctxt.set_var(f, internal);
+        }
+        if (cname==mname){ // in constructor
+            mctxt.emit("obj_"+cname+" new_"+cname+"("+s->emit_full_sig(mctxt,whereami)+") {");
+            mctxt.emit("obj_"+cname+" this = (obj_"+cname+") malloc(sizeof(struct obj_"+cname+"_struct));");
+            mctxt.emit("this->clazz = the_class_"+cname+";");
+            statements_.gen_rval(mctxt, s, whereami);
+            mctxt.emit("return this;");
+        } else {
+            mctxt.emit("obj_"+returns+" "+cname+"_method_"+mname+"("+s->emit_full_sig(mctxt,whereami)+") {");
+            statements_.gen_rval(mctxt, s, whereami);
+            if (returns=="Nothing"){mctxt.emit("return nothing;");}
+        }
+        mctxt.emit("};");
+        mctxt.emit("");
+        return "";
+    }
+
+    string Return::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        string type = expr_.infer_type(s,whereami);
+        string target = expr_.gen_rval(ctxt, s, whereami);
+        ctxt.emit("return "+target+";");
+        return target;
+    }
+
+    string Assign::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
         string vname = lexpr_.get_name();
+        //string vtype = lexpr_.infer_type(s,whereami);
         string vtype = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
         string loc = lexpr_.gen_lval(ctxt, s, whereami);
-        string target = rexpr_.gen_rval(ctxt, target_reg, s, whereami);
+        string target = rexpr_.gen_rval(ctxt, s, whereami);
         ctxt.emit(loc + " = " + target + ";");
-        return loc;
-    }
-
-    string Call::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
-        string receiver_type = receiver_.infer_type(s,whereami);
-        string mname = method_.get_name();
-        string returns = s->hierarchy[receiver_type].methods[mname].returns;
-
-        vector<string> ts = {receiver_.gen_rval(ctxt,target_reg,s,whereami)};
-        for (int i=0; i<actuals_.elements_.size(); i++){
-            ts.push_back(actuals_.elements_[i]->gen_rval(ctxt,target_reg,s,whereami));
-        }
-        string target = ctxt.alloc_reg(returns);
-        string toprint = target+" = "+ts[0]+"->clazz->"+mname+"(";
-        for (int i=0; i<ts.size()-1; i++){
-            toprint = toprint+ts[i]+", ";
-        }
-        toprint = toprint+ts[ts.size()-1]+");";
-        ctxt.emit(toprint);
         return target;
     }
 
-    string Call::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami){
-        string receiver_type = receiver_.infer_type(s,whereami);
+    string Construct::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        string cname = method_.get_name();
+        string toemit = actuals_.gen_lval(ctxt, s, whereami);
+        string target = ctxt.alloc_reg(cname);
+        ctxt.emit(target+" = new_"+cname+"("+toemit+"); // Construct");
+        return target;
+    }
+
+    string Load::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        string vname = loc_.get_name();
+        //string type = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
+        string type = loc_.infer_type(s, whereami);
+        // if(whereami.classname=="Pt"&&whereami.methodname=="PLUS"){
+        //     cout<<"LOAD: "<<vname<<" " <<type<<endl;
+        // }
+        string fullname;
+        string target;
+        if (vname=="true"||vname=="false"){
+            fullname="lit_"+vname; type="Boolean";
+            target = ctxt.alloc_reg("Boolean");
+            ctxt.emit(target+" = "+fullname+"; // Load true/false ");
+        }
+        else {
+            fullname = whereami.classname+"_"+whereami.methodname+"_"+vname;
+            //type = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
+            string loc = ctxt.get_var(vname, type);
+            target = ctxt.alloc_reg(type);
+        //     if(whereami.classname=="Pt"&&whereami.methodname=="PLUS"){
+        //     cout<<"TYPE: "<<target<<" " <<type<<endl;
+        // }
+            //ctxt.emit(target+" = "+fullname+"; // Load existing variable ");
+            ctxt.emit(target+" = "+loc+"; // Load existing variable ");
+        }
+        return target;
+    }
+
+    string Call::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        // if(whereami.classname=="Pt"&&whereami.methodname=="PLUS"){
+        //     cout<<"CALL: "<<receiver_.get_type()<<endl;
+        // }
+        string cname = receiver_.infer_type(s, whereami);
+        //string cname = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
         string mname = method_.get_name();
-        string returns = s->hierarchy[receiver_type].methods[mname].returns;
-        
-        string target = ctxt.alloc_reg(returns);
-
-        vector<string> ts = {receiver_.gen_rval(ctxt,target,s,whereami)};
-        for (int i=0; i<actuals_.elements_.size(); i++){
-            ts.push_back(actuals_.elements_[i]->gen_rval(ctxt,target,s,whereami));
-        }
-        string toprint = target+" = "+ts[0]+"->clazz->"+mname+"(";
-        for (int i=0; i<ts.size()-1; i++){
-            toprint = toprint+ts[i]+", ";
-        }
-        toprint = toprint+ts[ts.size()-1]+");";
-        ctxt.emit(toprint);
-
+        string rtype = s->hierarchy[cname].methods[mname].returns;
+        string target = ctxt.alloc_reg(rtype);
+        string rloc = receiver_.gen_rval(ctxt, s, whereami);
+        string actuals = rloc;
+        if (actuals_.elements_.size()!=0){actuals+=", ";}
+        actuals = actuals + actuals_.gen_lval(ctxt, s, whereami);
+        ctxt.emit(target+" = "+rloc+"->clazz->"+mname+"("+actuals+");");
+        return target;
+    }
+    void Call::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami){
+        string cname = receiver_.infer_type(s, whereami);
+        string mname = method_.get_name();
+        string rtype = s->hierarchy[cname].methods[mname].returns;
+        string target = ctxt.alloc_reg(rtype);
+        string rloc = receiver_.gen_rval(ctxt, s, whereami);
+        string actuals = rloc;
+        if (actuals_.elements_.size()!=0){actuals+=", ";}
+        actuals = actuals + actuals_.gen_lval(ctxt, s, whereami);
+        ctxt.emit(target+" = "+rloc+"->clazz->"+mname+"("+actuals+");");
         ctxt.emit(string("if (") + target + "->value) goto " + true_branch + ";");
         ctxt.emit(string("goto ") + false_branch + ";");
-        return target;
     }
 
-    // string Construct::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami){
-    //     cout <<  "IN CONSTRUCT" << endl;
-    //     string type = method_.infer_type(s, whereami);
-    //     cout << type << endl;
-    //     exit(1);
-    //     return "c";
-    // }
-
-
-    string If::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
+    string If::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
         string thenpart = ctxt.new_branch_label("then");
         string elsepart = ctxt.new_branch_label("else");
         string endpart = ctxt.new_branch_label("endif");
         cond_.gen_branch(ctxt, thenpart, elsepart, s, whereami);
-        
+
+        string target = ctxt.alloc_reg("Boolean");
         ctxt.emit(thenpart + ": ;");
-        truepart_.gen_rval(ctxt, target_reg, s, whereami);
+        truepart_.gen_rval(ctxt, s, whereami);
         ctxt.emit(string("goto ") + endpart + ";");
         ctxt.emit(elsepart + ": ;");
-        falsepart_.gen_rval(ctxt, target_reg, s, whereami);
+        falsepart_.gen_rval(ctxt, s, whereami);
         ctxt.emit(endpart + ": ;");
-        return target_reg;
+        return target;
     }
-    string While::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
+
+    string While::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
         string truepart = ctxt.new_branch_label("while");
         string endpart = ctxt.new_branch_label("endwhile");
-        string target = cond_.gen_branch(ctxt, truepart, endpart, s, whereami);
+        cond_.gen_branch(ctxt, truepart, endpart, s, whereami);
+        
+        string target = ctxt.alloc_reg("Boolean");
         ctxt.emit(truepart + ": ;");
-        string b = body_.gen_rval(ctxt, target, s, whereami);
+        string b = body_.gen_rval(ctxt, s, whereami);
         cond_.gen_branch(ctxt, truepart, endpart, s, whereami);
         ctxt.emit(string("goto ")+truepart+";");
         ctxt.emit(endpart + ": ;");
-        return target_reg;
+        return target;
     }
 
-    string Load::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami){
+    void Load::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami){
         string vname = loc_.get_name();
-        string type = loc_.infer_type(s, whereami);
-        string fullname;
-        string target = ctxt.alloc_reg(type);
-        if (vname=="true"||vname=="false"){
-            fullname="lit_"+vname; type="Boolean";
-            ctxt.emit(target+" = "+fullname+"; // Load true/false ");
-            return target;
-        }
-        else {
-            fullname = whereami.classname+"_"+whereami.methodname+"_"+vname;
-            type = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
-            string loc = ctxt.get_var(fullname, type);
-            ctxt.emit(target+" = "+loc+"; // Load existing variable ");
-            return target;
-        }
-    }
-
-    string Load::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami){
-        string vname = loc_.get_name();
-        string type = loc_.infer_type(s, whereami);
+        string type = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
+        //string type = loc_.infer_type(s, whereami);
         string fullname;
         string target = ctxt.alloc_reg(type);
         if (vname=="true"||vname=="false"){
@@ -380,12 +496,46 @@ namespace AST {
         }
         ctxt.emit(string("if (") + target + "->value) goto " + true_branch + ";");
         ctxt.emit(string("goto ") + false_branch + ";");
-        return target;
     }
 
-    string And::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
-        string lv = left_.gen_rval(ctxt, target_reg, s, whereami);
-        string rv = right_.gen_rval(ctxt, target_reg, s, whereami);
+
+    string Load::gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        string vname = loc_.get_name();
+        string vtype = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
+        //vname = whereami.classname+"_"+whereami.methodname+"_"+vname;
+        return ctxt.get_var(vname, vtype);
+    }
+
+
+    string Dot::gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        string vname = this->get_name();
+        string vtype = s->hierarchy[whereami.classname].methods[whereami.methodname].types[vname];
+        // if (whereami.classname==whereami.methodname){
+        //     return "new_thing->"+ctxt.get_var(vname,vtype);
+        // }
+        return ctxt.get_var(vname,vtype);
+    }
+
+    string Actuals::gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami){
+        vector<string> locs;
+        for (Expr *a: elements_){
+            string type = a->infer_type(s, whereami);
+            //string loc = ctxt.alloc_reg(type);
+            //cout<<"Actual "<<loc<<" "<<a->get_type()<<endl;
+            string loc = a->gen_rval(ctxt, s, whereami);
+            locs.push_back(loc);
+        }
+        string toemit;
+        for (string l: locs){
+            toemit = toemit+l+", ";
+        }
+        if (locs.size()!=0){toemit = toemit.substr(0, toemit.size()-2);}
+        return toemit;
+    }
+
+    string And::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        string lv = left_.gen_rval(ctxt, s, whereami);
+        string rv = right_.gen_rval(ctxt, s, whereami);
         string target = ctxt.alloc_reg("Boolean");
 
         string thenpart = ctxt.new_branch_label("then");
@@ -403,17 +553,16 @@ namespace AST {
         ctxt.free_reg(rv);
         return target;
     }
-    string And::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
+    void And::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
         string right_part = ctxt.new_branch_label("and");
         left_.gen_branch(ctxt, right_part, false_branch, s, whereami);
         ctxt.emit(right_part + ": ;");
         right_.gen_branch(ctxt, true_branch, false_branch, s, whereami);
-        return right_part;
     }
 
-    string Or::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
-        string lv = left_.gen_rval(ctxt, target_reg, s, whereami);
-        string rv = right_.gen_rval(ctxt, target_reg, s, whereami);
+    string Or::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        string lv = left_.gen_rval(ctxt, s, whereami);
+        string rv = right_.gen_rval(ctxt, s, whereami);
         string target = ctxt.alloc_reg("Boolean");
 
         string thenpart = ctxt.new_branch_label("then");
@@ -429,19 +578,17 @@ namespace AST {
         ctxt.emit(endpart + ": ;");
         ctxt.free_reg(lv);
         ctxt.free_reg(rv);
-
         return target;
     }
-    string Or::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
+    void Or::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
         string right_part = ctxt.new_branch_label("or");
         left_.gen_branch(ctxt, true_branch, right_part, s, whereami);
         ctxt.emit(right_part + ": ;");
         right_.gen_branch(ctxt, true_branch, false_branch, s, whereami);
-        return right_part;
     }
 
-    string Not::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
-        string lv = left_.gen_rval(ctxt, target_reg, s, whereami);
+    string Not::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        string lv = left_.gen_rval(ctxt, s, whereami);
         string target = ctxt.alloc_reg("Boolean");
 
         string thenpart = ctxt.new_branch_label("then");
@@ -456,13 +603,10 @@ namespace AST {
         ctxt.emit(target+" = lit_false;");
         ctxt.emit(endpart + ": ;");
         ctxt.free_reg(lv);
-
         return target;
     }
-
-    string Not::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
+    void Not::gen_branch(CodegenContext &ctxt, string true_branch, string false_branch, Semantics *s, Whereami whereami) {
         left_.gen_branch(ctxt, false_branch, true_branch, s, whereami);
-        return "";
     }
 
     string Ident::gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
@@ -473,22 +617,30 @@ namespace AST {
             fullname = whereami.classname+"_"+whereami.methodname+"_"+text_;
             type = s->hierarchy[whereami.classname].methods[whereami.methodname].types[text_];
         }
-        return ctxt.get_var(fullname, type);
+        //return ctxt.get_var(fullname, type);
+        return ctxt.get_var(text_, type);
     }
 
-    string IntConst::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
+    string IntConst::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        //if(target_reg==""){target_reg = ctxt.alloc_reg("Int");}
         string target = ctxt.alloc_reg("Int");
-        ctxt.emit(target + " = int_literal(" + to_string(value_)
-            + "); // LOAD constant value");
+        ctxt.emit(target + " = int_literal(" + to_string(value_) + ");");
         return target;
+        //ctxt.emit(target_reg + " = int_literal(" + to_string(value_) + ");");
     }
-    string StrConst::gen_rval(CodegenContext &ctxt, string target_reg, Semantics *s, Whereami whereami) {
-        string target = ctxt.alloc_reg("String");
-        ctxt.emit(target + " = str_literal(\"" + value_
-            + "\");"); // LOAD constant value");
-        return target;
+    string IntConst::gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        return "int_literal("+to_string(value_)+")";
     }
 
+    string StrConst::gen_rval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        //if(target_reg==""){target_reg = ctxt.alloc_reg("String");}
+        string target = ctxt.alloc_reg("String");
+        ctxt.emit(target + " = str_literal(\"" + value_ + "\");");
+        return target;
+    }
+    string StrConst::gen_lval(CodegenContext &ctxt, Semantics *s, Whereami whereami) {
+        return "str_literal(\""+value_+"\")";
+    }
 
 
     //===================================================//

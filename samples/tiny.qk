@@ -1,13 +1,44 @@
+class Pt(x: Int, y: Int) {
+	this.x : Int = x;
+	this.y = y;
+	z = 10;
+	def STR() : String {
+      return "Pt(" + this.x.STR() +
+      	", " + this.y.STR() + ")";
+  	}
+	def incr_x(a: Int) : Nothing {
+		this.x = this.x+a;
+	}
+}
+class Blah(x: Int) extends Pt {
+	this.x = x;
+	this.y = 10;
+	def STR() : String {
+      return "Blah(" + this.x.STR() +
+      	", " + this.y.STR() + ")";
+  	}
+}
+
 42;
 42.PRINT();
 (1+2).PRINT();
 
+x = 4;
+p = Pt(x, 2);
+p.incr_x(5);
+p.PRINT();
+
+blah = Blah(4);
+blah.incr_x(1);
+blah.PRINT();
+
 s : String = "hello";
 s.PRINT();
-x = 4;
-if x<5 and x>6 {
+
+if x<5 and x<6 {
 	y = 42;
 } else {
+	//y = 26;
 	y = "forty-two";
 }
 y.PRINT();

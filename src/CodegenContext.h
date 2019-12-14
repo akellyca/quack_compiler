@@ -27,24 +27,16 @@ class CodegenContext {
     ostream &object_code;
 public:
     explicit CodegenContext(ostream &out) : object_code{out} {};
-    void emit(string s) { object_code << " " << s  << endl; }
+    void emit(string s) { object_code << "" << s  << endl; }
 
     /* Getting the name of a "register" (really a local variable in C)
      * has the side effect of emitting a declaration for the variable.
      */
     //string alloc_reg() {
     string alloc_reg(string type) {
-        string ctype;
-        if (type=="Int"){ctype = "obj_Int";}
-        else if (type=="String"){ctype="obj_Int";}
-        else if(type=="Boolean"){ctype="obj_Boolean";}
-        else if(type=="Nothing"){ctype="obj_Nothing";}
-        else if(type=="Obj"){ctype="obj_Obj";}
-        else{ctype=type;}
         int reg_num = next_reg_num++;
         string reg_name = "tmp__" + to_string(reg_num);
-        object_code<<ctype<<" "<<reg_name<< ";"<<endl;
-        //object_code<<"obj_Obj "<<reg_name<< ";"<<endl;
+        object_code<<"obj_"<<type<<" "<<reg_name<< ";"<<endl;
         return reg_name;
     }
 
@@ -60,22 +52,40 @@ public:
      */
     //string get_var(string &ident) {
     string get_var(string &ident, string type){
-
+        int is_dot=0;
+        if (ident.find(".")!=string::npos){
+            string replaced = "";
+            for (char c: ident){
+                if(c=='.'){ replaced=replaced+"__";}
+                else { replaced+=c; }
+            }
+            ident = replaced;
+            is_dot=1;
+        }
         if (vars.count(ident) == 0) {
             string internal = string("var_") + ident;
             vars[ident] = internal;
             // We'll need a declaration in the generated code
-            string ctype;
-            if (type=="Int"){ctype = "obj_Int";}
-            else if (type=="String"){ctype="obj_Int";}
-            else if(type=="Boolean"){ctype="obj_Boolean";}
-            else if(type=="Nothing"){ctype="obj_Nothing";}
-            else if(type=="Obj"){ctype="obj_Obj";}
-            else{ctype=type;}
-            this->emit(string(ctype+" ") + internal + "; // Source variable " + ident);
+            this->emit(string("obj_"+type+" ") + internal + "; // Source variable " + ident);
             return internal;
         }
+        if (is_dot){
+            return "this->"+vars[ident];
+        }
         return vars[ident];
+    }
+
+    void set_var(string &ident, string val){ vars[ident] = val; }
+
+    string define_class_structs(string &ident){
+        // ensure all class objects are defined before use/reference
+        string internal = string("obj_") + ident;
+        this->emit("struct obj_"+ident+"_struct;");
+        this->emit("typedef struct obj_"+ident+"_struct *obj_"+ident+";");
+        this->emit("struct class_"+ident+"_struct;");
+        this->emit("typedef struct class_"+ident+"_struct *class_"+ident+";");
+        vars[ident] = internal; // ???
+        return internal;
     }
 
     /* Get a new, unique branch label.  We use a prefix
